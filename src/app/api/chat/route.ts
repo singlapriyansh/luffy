@@ -1,7 +1,41 @@
+import fs from "fs";
+import path from "path";
 import OpenAI from "openai";
 import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
+
+function readEnvFallback(key: string): string | undefined {
+  const fromProcess = process.env[key]?.trim();
+  if (fromProcess) return fromProcess;
+
+  for (const filename of [".env.local", ".env"]) {
+    try {
+      const filePath = path.join(process.cwd(), filename);
+      if (!fs.existsSync(filePath)) continue;
+      const content = fs.readFileSync(filePath, "utf8");
+      for (const rawLine of content.split(/\r?\n/)) {
+        const line = rawLine.trim();
+        if (!line || line.startsWith("#")) continue;
+        const eqIdx = line.indexOf("=");
+        if (eqIdx === -1) continue;
+        const k = line.slice(0, eqIdx).trim();
+        if (k !== key) continue;
+        let v = line.slice(eqIdx + 1).trim();
+        if (
+          (v.startsWith('"') && v.endsWith('"')) ||
+          (v.startsWith("'") && v.endsWith("'"))
+        ) {
+          v = v.slice(1, -1).trim();
+        }
+        if (v) return v;
+      }
+    } catch {
+      // Ignore filesystem read errors (e.g. serverless read-only environments)
+    }
+  }
+  return undefined;
+}
 
 const MAX_MESSAGES = 40;
 const MAX_MESSAGE_LENGTH = 12000;
@@ -67,8 +101,8 @@ function validateMessages(raw: unknown): { valid: true; messages: IncomingMessag
 
 export async function POST(req: NextRequest) {
   try {
-    const groqKey = process.env.GROQ_API_KEY?.trim();
-    const openaiKey = process.env.OPENAI_API_KEY?.trim();
+    const groqKey = readEnvFallback("GROQ_API_KEY");
+    const openaiKey = readEnvFallback("OPENAI_API_KEY");
 
     const useGroq = Boolean(groqKey && groqKey !== "your_groq_api_key_here");
     const useOpenAI = Boolean(openaiKey && openaiKey !== "your_api_key_here");
